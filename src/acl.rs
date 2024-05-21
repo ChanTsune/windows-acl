@@ -7,7 +7,7 @@ use field_offset::*;
 
 use std::fmt;
 use std::mem;
-use utils::{sid_to_string, SDSource, SecurityDescriptor};
+use utils::{sid_to_string, string_to_sid, SDSource, SecurityDescriptor};
 use winapi::shared::minwindef::{BYTE, DWORD, FALSE, LPVOID, WORD};
 use winapi::shared::ntdef::{HANDLE, NULL};
 use winapi::um::accctrl::{
@@ -1202,6 +1202,108 @@ impl ACL {
         }
 
         self.remove_entry(sid, entry_type, flags)
+    }
+
+    pub fn set(&mut self, acl: &[ACLEntry], is_dacl: bool) -> Result<usize, DWORD> {
+        let new_acl_size = acl
+            .iter()
+            .map(|it| {
+                acl_entry_size(it.entry_type).unwrap_or_default()
+                    - (mem::size_of::<DWORD>() as DWORD)
+                    + unsafe { GetLengthSid(it.sid.as_ref().unwrap().as_ptr() as PSID) }
+            })
+            .sum::<DWORD>() as usize;
+
+        let mut new_acl: Vec<BYTE> = Vec::with_capacity(new_acl_size);
+
+        if unsafe {
+            InitializeAcl(
+                new_acl.as_mut_ptr() as PACL,
+                new_acl_size as DWORD,
+                ACL_REVISION_DS as DWORD,
+            )
+        } == 0
+        {
+            return Err(0);
+        }
+
+        for ace in acl {
+            let sid = string_to_sid(&ace.string_sid).unwrap();
+            let status = match ace.entry_type {
+                AceType::AccessAllow => unsafe {
+                    AddAccessAllowedAceEx(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                    )
+                },
+                AceType::AccessDeny => unsafe {
+                    AddAccessDeniedAceEx(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                    )
+                },
+                AceType::SystemAudit => unsafe {
+                    AddAuditAccessAceEx(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                        FALSE,
+                        FALSE,
+                    )
+                },
+                AceType::SystemMandatoryLabel => unsafe {
+                    AddMandatoryAce(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                    )
+                },
+                _ => 0,
+            };
+
+            if status == 0 {
+                return Err(0);
+            }
+        }
+
+        let object_type = self.object_type().into();
+
+        if let Some(ref mut descriptor) = self.descriptor {
+            if is_dacl {
+                if !descriptor.apply(
+                    &self.source,
+                    object_type,
+                    Some(new_acl.as_ptr() as PACL),
+                    None,
+                ) {
+                    return Err(unsafe { GetLastError() });
+                }
+            } else {
+                if !descriptor.apply(
+                    &self.source,
+                    object_type,
+                    None,
+                    Some(new_acl.as_ptr() as PACL),
+                ) {
+                    return Err(unsafe { GetLastError() });
+                }
+            }
+        }
+
+        if !self.reload() {
+            return Err(unsafe { GetLastError() });
+        }
+        Ok(acl.len())
     }
 }
 
