@@ -5,9 +5,9 @@
 #[allow(unused_imports)]
 use field_offset::*;
 
+use crate::utils::{sid_to_string, string_to_sid, SDSource, SecurityDescriptor};
 use std::fmt;
 use std::mem;
-use crate::utils::{sid_to_string, string_to_sid, SDSource, SecurityDescriptor};
 use winapi::shared::minwindef::{BYTE, DWORD, FALSE, LPVOID, WORD};
 use winapi::shared::ntdef::{HANDLE, NULL};
 use winapi::um::accctrl::{
@@ -230,7 +230,7 @@ macro_rules! process_entry {
                     $entry.entry_size = (mem::size_of::<$cls>() as DWORD) -
                                         (mem::size_of::<DWORD>() as DWORD) +
                                         unsafe { GetLengthSid(sid.as_ptr() as PSID) };
-                    $entry.string_sid = sid_to_string(sid.as_ptr() as PSID).unwrap_or("".to_string());
+                    $entry.string_sid = unsafe {sid_to_string(sid.as_ptr() as PSID)}.unwrap_or("".to_string());
                     $entry.sid = Some(sid);
                     $entry.entry_type = $typ;
                     $entry.size = unsafe { (*$ptr).AceSize };
@@ -974,12 +974,11 @@ impl ACL {
 
             let new_acl = add_callback.new_acl.as_ptr() as PACL;
 
-            let status: bool;
-            if is_dacl {
-                status = descriptor.apply(&self.source, object_type.into(), Some(new_acl), None);
+            let status: bool = if is_dacl {
+                descriptor.apply(&self.source, object_type.into(), Some(new_acl), None)
             } else {
-                status = descriptor.apply(&self.source, object_type.into(), None, Some(new_acl));
-            }
+                descriptor.apply(&self.source, object_type.into(), None, Some(new_acl))
+            };
 
             if !status {
                 return Err(unsafe { GetLastError() });

@@ -40,7 +40,7 @@ use winapi::um::winnt::{
 ///
 /// # Errors
 /// On error, a Windows error code is returned with the `Err` type.
-pub fn sid_to_string(sid: PSID) -> Result<String, DWORD> {
+pub unsafe fn sid_to_string(sid: PSID) -> Result<String, DWORD> {
     let mut raw_string_sid: LPWSTR = NULL as LPWSTR;
     if unsafe { ConvertSidToStringSidW(sid, &mut raw_string_sid) } == 0
         || raw_string_sid == (NULL as LPWSTR)
