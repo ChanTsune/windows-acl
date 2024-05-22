@@ -1,6 +1,6 @@
 #![cfg(windows)]
 
-use acl::{ACLEntry, AceType, ACL};
+use crate::acl::{ACLEntry, AceType, ACL};
 use std::env::current_exe;
 use std::fs::{File, OpenOptions};
 use std::os::windows::fs::OpenOptionsExt;
@@ -8,7 +8,7 @@ use std::os::windows::io::AsRawHandle;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Once;
-use utils::{current_user, name_to_sid, sid_to_string, string_to_sid};
+use crate::utils::{current_user, name_to_sid, sid_to_string, string_to_sid};
 use winapi::ctypes::c_void;
 use winapi::shared::winerror::ERROR_NOT_ALL_ASSIGNED;
 use winapi::um::winnt::{

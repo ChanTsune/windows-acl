@@ -7,7 +7,7 @@ use field_offset::*;
 
 use std::fmt;
 use std::mem;
-use utils::{sid_to_string, string_to_sid, SDSource, SecurityDescriptor};
+use crate::utils::{sid_to_string, string_to_sid, SDSource, SecurityDescriptor};
 use winapi::shared::minwindef::{BYTE, DWORD, FALSE, LPVOID, WORD};
 use winapi::shared::ntdef::{HANDLE, NULL};
 use winapi::um::accctrl::{
