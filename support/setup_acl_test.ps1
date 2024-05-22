@@ -116,8 +116,6 @@ function ResetDaclEntries {
     $acl | Set-Acl -Path $Path    
 }
 
-Import-Module Microsoft.PowerShell.Security
-
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
 # Setup query_test
