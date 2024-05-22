@@ -75,7 +75,8 @@ fn string_sid_by_user(user: &str) -> String {
     let user_sid = name_to_sid(user, None).unwrap_or_default();
     assert_ne!(user_sid.len(), 0);
 
-    let user_string_sid = sid_to_string(user_sid.as_ptr() as PSID).unwrap_or(String::from(""));
+    let user_string_sid =
+        unsafe { sid_to_string(user_sid.as_ptr() as PSID) }.unwrap_or(String::from(""));
     assert_ne!(user_string_sid.len(), 0);
 
     user_string_sid
@@ -96,7 +97,8 @@ fn lookupname_unit_test() {
     let raw_world_sid = name_to_sid(world_name, None).unwrap_or_default();
     assert_ne!(raw_world_sid.len(), 0);
 
-    let sid_string = sid_to_string(raw_world_sid.as_ptr() as PSID).unwrap_or(String::from(""));
+    let sid_string =
+        unsafe { sid_to_string(raw_world_sid.as_ptr() as PSID) }.unwrap_or(String::from(""));
     assert_ne!(sid_string.len(), 0);
 
     assert_eq!(sid_string, world_string_sid);
@@ -109,7 +111,7 @@ fn sidstring_unit_test() {
     let sid = string_to_sid(world_string_sid).unwrap_or_default();
     assert_ne!(sid.len(), 0);
 
-    let sid_string = sid_to_string(sid.as_ptr() as PSID).unwrap_or(String::from(""));
+    let sid_string = unsafe { sid_to_string(sid.as_ptr() as PSID) }.unwrap_or(String::from(""));
     assert_ne!(sid_string.len(), 0);
 
     assert_eq!(sid_string, world_string_sid);
