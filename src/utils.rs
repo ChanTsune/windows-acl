@@ -2,7 +2,6 @@
 
 #![allow(non_snake_case)]
 
-use libc;
 use std::ffi::OsStr;
 use std::iter::once;
 use std::mem;

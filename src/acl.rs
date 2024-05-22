@@ -651,19 +651,17 @@ impl EntryCallback for RemoveEntryCallback {
                         return true;
                     }
                 }
-            } else {
-                if let Some(mask) = self.flags {
-                    if (entry.flags & mask) == mask {
-                        // NOTE(andy) sid and flag mask all match, remove it!
-                        self.removed += 1;
-                        return true;
-                    }
-                } else {
-                    // NOTE(andy): We don't have a flags mask to search for so since the sid matches
-                    //             this is an item we want to remove
+            } else if let Some(mask) = self.flags {
+                if (entry.flags & mask) == mask {
+                    // NOTE(andy) sid and flag mask all match, remove it!
                     self.removed += 1;
                     return true;
                 }
+            } else {
+                // NOTE(andy): We don't have a flags mask to search for so since the sid matches
+                //             this is an item we want to remove
+                self.removed += 1;
+                return true;
             }
         }
 
@@ -1288,15 +1286,13 @@ impl ACL {
                 ) {
                     return Err(unsafe { GetLastError() });
                 }
-            } else {
-                if !descriptor.apply(
-                    &self.source,
-                    object_type,
-                    None,
-                    Some(new_acl.as_ptr() as PACL),
-                ) {
-                    return Err(unsafe { GetLastError() });
-                }
+            } else if !descriptor.apply(
+                &self.source,
+                object_type,
+                None,
+                Some(new_acl.as_ptr() as PACL),
+            ) {
+                return Err(unsafe { GetLastError() });
             }
         }
 
