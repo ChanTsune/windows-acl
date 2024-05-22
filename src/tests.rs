@@ -8,7 +8,6 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Once;
 use winapi::ctypes::c_void;
 use winapi::shared::winerror::ERROR_NOT_ALL_ASSIGNED;
 use winapi::um::winnt::{
@@ -17,8 +16,6 @@ use winapi::um::winnt::{
     SYSTEM_MANDATORY_LABEL_NO_EXECUTE_UP, SYSTEM_MANDATORY_LABEL_NO_READ_UP,
     SYSTEM_MANDATORY_LABEL_NO_WRITE_UP, WRITE_DAC,
 };
-
-static START: Once = Once::new();
 
 fn support_path() -> Option<PathBuf> {
     if let Ok(mut path) = current_exe() {
@@ -136,10 +133,6 @@ fn acl_entry_exists(entries: &Vec<ACLEntry>, expected: &ACLEntry) -> Option<usiz
 // Make sure we can read DACL entries set by an external tool (PowerShell)
 #[test]
 fn query_dacl_unit_test() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let guest_sid = string_sid_by_user("Guest");
     let current_user_sid = current_user_string_sid();
 
@@ -194,10 +187,6 @@ fn query_dacl_unit_test() {
 // Make sure we can read SACL entries set by external tools (PowerShell/.NET)
 #[test]
 fn query_sacl_unit_test() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let world_sid = string_sid_by_user("Everyone");
 
     let mut path_obj = support_path().unwrap_or_default();
@@ -239,10 +228,6 @@ fn query_sacl_unit_test() {
 
 // Ensure that we can add and remove DACL access allow entries
 fn add_and_remove_dacl_allow(use_handle: bool) {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let current_user = current_user_string_sid();
     let current_user_sid = match string_to_sid(&current_user) {
         Ok(x) => x,
@@ -361,10 +346,6 @@ fn add_and_remove_dacl_allow_handle_test() {
 
 // Ensure we can add and remove DACL access deny entries
 fn add_and_remove_dacl_deny(use_handle: bool) {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let current_user = current_user_string_sid();
     let current_user_sid = match string_to_sid(&current_user) {
         Ok(x) => x,
@@ -479,10 +460,6 @@ fn add_and_remove_dacl_deny_handle_test() {
 // Ensure we can add and remove a SACL mandatory level entry
 #[test]
 fn add_remove_sacl_mil() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let low_mil_string_sid = "S-1-16-4096";
     let low_mil_sid = match string_to_sid(low_mil_string_sid) {
         Ok(x) => x,
@@ -560,10 +537,6 @@ fn add_remove_sacl_mil() {
 // Make sure we can add and remove a SACL audit entry
 #[test]
 fn add_remove_sacl_audit() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let mut path_obj = support_path().unwrap_or_default();
     path_obj.push("sacl_audit_file");
     assert!(path_obj.exists());
@@ -636,10 +609,6 @@ fn add_remove_sacl_audit() {
 // Make sure ACL::get and ACL::remove work as we expect
 #[test]
 fn acl_get_and_remove_test() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let mut path_obj = support_path().unwrap_or_default();
     path_obj.push("acl_get_and_remove");
     assert!(path_obj.exists());
