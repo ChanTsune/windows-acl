@@ -5,9 +5,9 @@
 #[allow(unused_imports)]
 use field_offset::*;
 
+use crate::utils::{sid_to_string, string_to_sid, SDSource, SecurityDescriptor};
 use std::fmt;
 use std::mem;
-use utils::{sid_to_string, SDSource, SecurityDescriptor};
 use winapi::shared::minwindef::{BYTE, DWORD, FALSE, LPVOID, WORD};
 use winapi::shared::ntdef::{HANDLE, NULL};
 use winapi::um::accctrl::{
@@ -230,7 +230,7 @@ macro_rules! process_entry {
                     $entry.entry_size = (mem::size_of::<$cls>() as DWORD) -
                                         (mem::size_of::<DWORD>() as DWORD) +
                                         unsafe { GetLengthSid(sid.as_ptr() as PSID) };
-                    $entry.string_sid = sid_to_string(sid.as_ptr() as PSID).unwrap_or("".to_string());
+                    $entry.string_sid = unsafe {sid_to_string(sid.as_ptr() as PSID)}.unwrap_or("".to_string());
                     $entry.sid = Some(sid);
                     $entry.entry_type = $typ;
                     $entry.size = unsafe { (*$ptr).AceSize };
@@ -282,7 +282,7 @@ fn acl_entry_size(entry_type: AceType) -> Option<DWORD> {
         AceType::AccessDenyCallback => Some(mem::size_of::<ACCESS_DENIED_CALLBACK_ACE>() as DWORD),
         AceType::AccessDenyObject => Some(mem::size_of::<ACCESS_DENIED_OBJECT_ACE>() as DWORD),
         AceType::AccessDenyCallbackObject => {
-            Some(mem::size_of::<ACCESS_DENIED_CALLBACK_OBJECT_ACE> as DWORD)
+            Some(mem::size_of::<ACCESS_DENIED_CALLBACK_OBJECT_ACE>() as DWORD)
         }
         AceType::SystemAudit => Some(mem::size_of::<SYSTEM_AUDIT_ACE>() as DWORD),
         AceType::SystemAuditCallback => Some(mem::size_of::<SYSTEM_AUDIT_CALLBACK_ACE>() as DWORD),
@@ -651,19 +651,17 @@ impl EntryCallback for RemoveEntryCallback {
                         return true;
                     }
                 }
-            } else {
-                if let Some(mask) = self.flags {
-                    if (entry.flags & mask) == mask {
-                        // NOTE(andy) sid and flag mask all match, remove it!
-                        self.removed += 1;
-                        return true;
-                    }
-                } else {
-                    // NOTE(andy): We don't have a flags mask to search for so since the sid matches
-                    //             this is an item we want to remove
+            } else if let Some(mask) = self.flags {
+                if (entry.flags & mask) == mask {
+                    // NOTE(andy) sid and flag mask all match, remove it!
                     self.removed += 1;
                     return true;
                 }
+            } else {
+                // NOTE(andy): We don't have a flags mask to search for so since the sid matches
+                //             this is an item we want to remove
+                self.removed += 1;
+                return true;
             }
         }
 
@@ -976,12 +974,11 @@ impl ACL {
 
             let new_acl = add_callback.new_acl.as_ptr() as PACL;
 
-            let status: bool;
-            if is_dacl {
-                status = descriptor.apply(&self.source, object_type.into(), Some(new_acl), None);
+            let status: bool = if is_dacl {
+                descriptor.apply(&self.source, object_type.into(), Some(new_acl), None)
             } else {
-                status = descriptor.apply(&self.source, object_type.into(), None, Some(new_acl));
-            }
+                descriptor.apply(&self.source, object_type.into(), None, Some(new_acl))
+            };
 
             if !status {
                 return Err(unsafe { GetLastError() });
@@ -1202,6 +1199,106 @@ impl ACL {
         }
 
         self.remove_entry(sid, entry_type, flags)
+    }
+
+    pub fn set(&mut self, acl: &[ACLEntry], is_dacl: bool) -> Result<usize, DWORD> {
+        let new_acl_size = acl
+            .iter()
+            .map(|it| {
+                acl_entry_size(it.entry_type).unwrap_or_default()
+                    - (mem::size_of::<DWORD>() as DWORD)
+                    + unsafe { GetLengthSid(it.sid.as_ref().unwrap().as_ptr() as PSID) }
+            })
+            .sum::<DWORD>() as usize;
+
+        let mut new_acl: Vec<BYTE> = Vec::with_capacity(new_acl_size);
+
+        if unsafe {
+            InitializeAcl(
+                new_acl.as_mut_ptr() as PACL,
+                new_acl_size as DWORD,
+                ACL_REVISION_DS as DWORD,
+            )
+        } == 0
+        {
+            return Err(0);
+        }
+
+        for ace in acl {
+            let sid = string_to_sid(&ace.string_sid).unwrap();
+            let status = match ace.entry_type {
+                AceType::AccessAllow => unsafe {
+                    AddAccessAllowedAceEx(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                    )
+                },
+                AceType::AccessDeny => unsafe {
+                    AddAccessDeniedAceEx(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                    )
+                },
+                AceType::SystemAudit => unsafe {
+                    AddAuditAccessAceEx(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                        FALSE,
+                        FALSE,
+                    )
+                },
+                AceType::SystemMandatoryLabel => unsafe {
+                    AddMandatoryAce(
+                        new_acl.as_mut_ptr() as PACL,
+                        ACL_REVISION_DS as DWORD,
+                        ace.flags as DWORD,
+                        ace.mask,
+                        sid.as_ptr() as PSID,
+                    )
+                },
+                _ => 0,
+            };
+
+            if status == 0 {
+                return Err(0);
+            }
+        }
+
+        let object_type = self.object_type().into();
+
+        if let Some(ref mut descriptor) = self.descriptor {
+            if is_dacl {
+                if !descriptor.apply(
+                    &self.source,
+                    object_type,
+                    Some(new_acl.as_ptr() as PACL),
+                    None,
+                ) {
+                    return Err(unsafe { GetLastError() });
+                }
+            } else if !descriptor.apply(
+                &self.source,
+                object_type,
+                None,
+                Some(new_acl.as_ptr() as PACL),
+            ) {
+                return Err(unsafe { GetLastError() });
+            }
+        }
+
+        if !self.reload() {
+            return Err(unsafe { GetLastError() });
+        }
+        Ok(acl.len())
     }
 }
 

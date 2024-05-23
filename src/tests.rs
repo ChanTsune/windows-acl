@@ -1,14 +1,13 @@
 #![cfg(windows)]
 
-use acl::{ACLEntry, AceType, ACL};
+use crate::acl::{ACLEntry, AceType, ACL};
+use crate::utils::{current_user, name_to_sid, sid_to_string, string_to_sid};
 use std::env::current_exe;
 use std::fs::{File, OpenOptions};
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Once;
-use utils::{current_user, name_to_sid, sid_to_string, string_to_sid};
 use winapi::ctypes::c_void;
 use winapi::shared::winerror::ERROR_NOT_ALL_ASSIGNED;
 use winapi::um::winnt::{
@@ -17,8 +16,6 @@ use winapi::um::winnt::{
     SYSTEM_MANDATORY_LABEL_NO_EXECUTE_UP, SYSTEM_MANDATORY_LABEL_NO_READ_UP,
     SYSTEM_MANDATORY_LABEL_NO_WRITE_UP, WRITE_DAC,
 };
-
-static START: Once = Once::new();
 
 fn support_path() -> Option<PathBuf> {
     if let Ok(mut path) = current_exe() {
@@ -48,7 +45,7 @@ fn run_ps_script(file_name: &str) -> bool {
 
         if let Some(script_path) = path.to_str() {
             let mut process = match Command::new("PowerShell.exe")
-                .args(&["-ExecutionPolicy", "bypass", "-File", script_path])
+                .args(["-ExecutionPolicy", "bypass", "-File", script_path])
                 .spawn()
             {
                 Ok(process) => process,
@@ -57,14 +54,10 @@ fn run_ps_script(file_name: &str) -> bool {
                 }
             };
 
-            match process.wait() {
-                Ok(_code) => {
-                    return true;
-                }
-                Err(_code) => {
-                    return false;
-                }
-            }
+            return match process.wait() {
+                Ok(_code) => true,
+                Err(_code) => false,
+            };
         }
     }
 
@@ -72,10 +65,11 @@ fn run_ps_script(file_name: &str) -> bool {
 }
 
 fn string_sid_by_user(user: &str) -> String {
-    let user_sid = name_to_sid(user, None).unwrap_or(Vec::new());
+    let user_sid = name_to_sid(user, None).unwrap_or_default();
     assert_ne!(user_sid.len(), 0);
 
-    let user_string_sid = sid_to_string(user_sid.as_ptr() as PSID).unwrap_or(String::from(""));
+    let user_string_sid =
+        unsafe { sid_to_string(user_sid.as_ptr() as PSID) }.unwrap_or(String::from(""));
     assert_ne!(user_string_sid.len(), 0);
 
     user_string_sid
@@ -93,10 +87,11 @@ fn lookupname_unit_test() {
     let world_name = "Everyone";
     let world_string_sid = "S-1-1-0";
 
-    let raw_world_sid = name_to_sid(world_name, None).unwrap_or(Vec::new());
+    let raw_world_sid = name_to_sid(world_name, None).unwrap_or_default();
     assert_ne!(raw_world_sid.len(), 0);
 
-    let sid_string = sid_to_string(raw_world_sid.as_ptr() as PSID).unwrap_or(String::from(""));
+    let sid_string =
+        unsafe { sid_to_string(raw_world_sid.as_ptr() as PSID) }.unwrap_or(String::from(""));
     assert_ne!(sid_string.len(), 0);
 
     assert_eq!(sid_string, world_string_sid);
@@ -106,10 +101,10 @@ fn lookupname_unit_test() {
 fn sidstring_unit_test() {
     let world_string_sid = "S-1-5-21";
 
-    let sid = string_to_sid(world_string_sid).unwrap_or(Vec::new());
+    let sid = string_to_sid(world_string_sid).unwrap_or_default();
     assert_ne!(sid.len(), 0);
 
-    let sid_string = sid_to_string(sid.as_ptr() as PSID).unwrap_or(String::from(""));
+    let sid_string = unsafe { sid_to_string(sid.as_ptr() as PSID) }.unwrap_or(String::from(""));
     assert_ne!(sid_string.len(), 0);
 
     assert_eq!(sid_string, world_string_sid);
@@ -134,14 +129,10 @@ fn acl_entry_exists(entries: &Vec<ACLEntry>, expected: &ACLEntry) -> Option<usiz
 // Make sure we can read DACL entries set by an external tool (PowerShell)
 #[test]
 fn query_dacl_unit_test() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let guest_sid = string_sid_by_user("Guest");
     let current_user_sid = current_user_string_sid();
 
-    let mut path_obj = support_path().unwrap_or(PathBuf::new());
+    let mut path_obj = support_path().unwrap_or_default();
     path_obj.push("query_test");
     assert!(path_obj.exists());
 
@@ -152,7 +143,7 @@ fn query_dacl_unit_test() {
     assert!(acl_result.is_ok());
 
     let acl = acl_result.unwrap();
-    let entries = acl.all().unwrap_or(Vec::new());
+    let entries = acl.all().unwrap_or_default();
     assert_ne!(entries.len(), 0);
 
     let mut expected = ACLEntry::new();
@@ -192,13 +183,9 @@ fn query_dacl_unit_test() {
 // Make sure we can read SACL entries set by external tools (PowerShell/.NET)
 #[test]
 fn query_sacl_unit_test() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let world_sid = string_sid_by_user("Everyone");
 
-    let mut path_obj = support_path().unwrap_or(PathBuf::new());
+    let mut path_obj = support_path().unwrap_or_default();
     path_obj.push("query_sacl_test");
     assert!(path_obj.exists());
 
@@ -237,10 +224,6 @@ fn query_sacl_unit_test() {
 
 // Ensure that we can add and remove DACL access allow entries
 fn add_and_remove_dacl_allow(use_handle: bool) {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let current_user = current_user_string_sid();
     let current_user_sid = match string_to_sid(&current_user) {
         Ok(x) => x,
@@ -251,7 +234,7 @@ fn add_and_remove_dacl_allow(use_handle: bool) {
         }
     };
 
-    let mut path_obj = support_path().unwrap_or(PathBuf::new());
+    let mut path_obj = support_path().unwrap_or_default();
     path_obj.push(if use_handle {
         "dacl_allow_handle"
     } else {
@@ -343,7 +326,6 @@ fn add_and_remove_dacl_allow(use_handle: bool) {
         Some(i) => {
             println!("Did not expect to find AccessAllow entry at {}", i);
             assert!(false);
-            return;
         }
     }
 }
@@ -360,10 +342,6 @@ fn add_and_remove_dacl_allow_handle_test() {
 
 // Ensure we can add and remove DACL access deny entries
 fn add_and_remove_dacl_deny(use_handle: bool) {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let current_user = current_user_string_sid();
     let current_user_sid = match string_to_sid(&current_user) {
         Ok(x) => x,
@@ -374,7 +352,7 @@ fn add_and_remove_dacl_deny(use_handle: bool) {
         }
     };
 
-    let mut path_obj = support_path().unwrap_or(PathBuf::new());
+    let mut path_obj = support_path().unwrap_or_default();
     path_obj.push(if use_handle {
         "dacl_deny_handle"
     } else {
@@ -461,7 +439,6 @@ fn add_and_remove_dacl_deny(use_handle: bool) {
         Some(i) => {
             println!("AccessDeny unexpectedly exists at {}", i);
             assert!(false);
-            return;
         }
     }
 }
@@ -479,12 +456,8 @@ fn add_and_remove_dacl_deny_handle_test() {
 // Ensure we can add and remove a SACL mandatory level entry
 #[test]
 fn add_remove_sacl_mil() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
     let low_mil_string_sid = "S-1-16-4096";
-    let low_mil_sid = match string_to_sid(&low_mil_string_sid) {
+    let low_mil_sid = match string_to_sid(low_mil_string_sid) {
         Ok(x) => x,
         Err(x) => {
             println!("string_to_sid failed for {}: GLE={}", low_mil_string_sid, x);
@@ -493,7 +466,7 @@ fn add_remove_sacl_mil() {
         }
     };
 
-    let mut path_obj = support_path().unwrap_or(PathBuf::new());
+    let mut path_obj = support_path().unwrap_or_default();
     path_obj.push("sacl_mil_file");
     assert!(path_obj.exists());
 
@@ -522,7 +495,7 @@ fn add_remove_sacl_mil() {
         }
     }
 
-    let mut entries = acl.all().unwrap_or(Vec::new());
+    let mut entries = acl.all().unwrap_or_default();
     assert_ne!(entries.len(), 0);
 
     let mut expected = ACLEntry::new();
@@ -551,7 +524,7 @@ fn add_remove_sacl_mil() {
         }
     }
 
-    entries = acl.all().unwrap_or(Vec::new());
+    entries = acl.all().unwrap_or_default();
     assert_ne!(entries.len(), 0);
 
     assert!(acl_entry_exists(&entries, &expected).is_none());
@@ -560,11 +533,7 @@ fn add_remove_sacl_mil() {
 // Make sure we can add and remove a SACL audit entry
 #[test]
 fn add_remove_sacl_audit() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
-    let mut path_obj = support_path().unwrap_or(PathBuf::new());
+    let mut path_obj = support_path().unwrap_or_default();
     path_obj.push("sacl_audit_file");
     assert!(path_obj.exists());
 
@@ -600,7 +569,7 @@ fn add_remove_sacl_audit() {
         }
     }
 
-    let mut entries = acl.all().unwrap_or(Vec::new());
+    let mut entries = acl.all().unwrap_or_default();
     assert_ne!(entries.len(), 0);
 
     let mut expected = ACLEntry::new();
@@ -627,7 +596,7 @@ fn add_remove_sacl_audit() {
         }
     }
 
-    entries = acl.all().unwrap_or(Vec::new());
+    entries = acl.all().unwrap_or_default();
     assert_ne!(entries.len(), 0);
 
     assert!(acl_entry_exists(&entries, &expected).is_none());
@@ -636,11 +605,7 @@ fn add_remove_sacl_audit() {
 // Make sure ACL::get and ACL::remove work as we expect
 #[test]
 fn acl_get_and_remove_test() {
-    START.call_once(|| {
-        assert!(run_ps_script("setup_acl_test.ps1"));
-    });
-
-    let mut path_obj = support_path().unwrap_or(PathBuf::new());
+    let mut path_obj = support_path().unwrap_or_default();
     path_obj.push("acl_get_and_remove");
     assert!(path_obj.exists());
 
@@ -655,7 +620,7 @@ fn acl_get_and_remove_test() {
     };
 
     let world = string_sid_by_user("Everyone");
-    let world_sid = string_to_sid(&world).unwrap_or(Vec::new());
+    let world_sid = string_to_sid(&world).unwrap_or_default();
     assert_ne!(world_sid.len(), 0);
 
     let path = path_obj.to_str().unwrap_or("");
@@ -676,22 +641,22 @@ fn acl_get_and_remove_test() {
 
     results = acl
         .get(guest_sid.as_ptr() as PSID, None)
-        .unwrap_or(Vec::new());
+        .unwrap_or_default();
     assert_eq!(results.len(), 3);
 
     results = acl
         .get(guest_sid.as_ptr() as PSID, Some(AceType::AccessAllow))
-        .unwrap_or(Vec::new());
+        .unwrap_or_default();
     assert_eq!(results.len(), 1);
 
     results = acl
         .get(guest_sid.as_ptr() as PSID, Some(AceType::AccessDeny))
-        .unwrap_or(Vec::new());
+        .unwrap_or_default();
     assert_eq!(results.len(), 1);
 
     results = acl
         .get(guest_sid.as_ptr() as PSID, Some(AceType::SystemAudit))
-        .unwrap_or(Vec::new());
+        .unwrap_or_default();
     assert_eq!(results.len(), 1);
 
     let mut removed = acl
@@ -701,7 +666,7 @@ fn acl_get_and_remove_test() {
 
     results = acl
         .get(guest_sid.as_ptr() as PSID, None)
-        .unwrap_or(Vec::new());
+        .unwrap_or_default();
     assert_eq!(results.len(), 2);
 
     removed = acl
