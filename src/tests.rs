@@ -54,14 +54,10 @@ fn run_ps_script(file_name: &str) -> bool {
                 }
             };
 
-            match process.wait() {
-                Ok(_code) => {
-                    return true;
-                }
-                Err(_code) => {
-                    return false;
-                }
-            }
+            return match process.wait() {
+                Ok(_code) => true,
+                Err(_code) => false,
+            };
         }
     }
 
